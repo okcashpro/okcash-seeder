@@ -410,9 +410,8 @@ static const string *seeds = mainnet_seeds;
 
 extern "C" void *ThreadSeeder(void *)
 {
-  if (!fTestNet)
-  {
-
+  if (!fTestNet){
+    db.Add(CService("seed1.okcash.co", GetDefaultPort()), true);
   }
   do {
     for (int i=0; seeds[i] != ""; i++) {
