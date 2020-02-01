@@ -404,14 +404,14 @@ extern "C" void* ThreadStats(void*) {
   return nullptr;
 }
 
-static const string mainnet_seeds[] = {"dns1.okcash.co", "dns2.okcash.co", "seed3.okcash.co", "seed4.okcash.co", "seed5.okcash.co", "seed6.okcash.co", "seed7.okcash.co", ""};
+static const string mainnet_seeds[] = {"seed1.okcash.co", "seed2.okcash.co", "seed3.okcash.co", "seed4.okcash.co", "seed5.okcash.co", "seed6.okcash.co", "seed7.okcash.co", ""};
 static const string testnet_seeds[] = {""};
 static const string *seeds = mainnet_seeds;
 
 extern "C" void *ThreadSeeder(void *)
 {
   if (!fTestNet){
-    db.Add(CService("seed1.okcash.co", GetDefaultPort()), true);
+    db.Add(CService("vps53.okcash.co", GetDefaultPort()), true);
   }
   do {
     for (int i=0; seeds[i] != ""; i++) {
