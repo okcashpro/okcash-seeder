@@ -21,7 +21,6 @@ public:
   int nThreads;
   int nPort;
   int nDnsThreads;
-  int fDaemon;
   int fUseTestNet;
   int fWipeBan;
   int fWipeIgnore;
@@ -33,7 +32,7 @@ public:
   const char *ipv6_proxy;
   std::set<uint64_t> filter_whitelist;
 
-  CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fDaemon(false), fUseTestNet(false), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL) {}
+  CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fUseTestNet(false), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL) {}
 
   void ParseCommandLine(int argc, char **argv) {
     static const char *help = "Okcash-seeder\n"
@@ -49,7 +48,6 @@ public:
                               "-o <ip:port>    Tor proxy IP/Port\n"
                               "-i <ip:port>    IPV4 SOCKS5 proxy IP/Port\n"
                               "-k <ip:port>    IPV6 SOCKS5 proxy IP/Port\n"
-                              "--daemon        Run as a daemon\n"
                               "-w f1,f2,...    Allow these flag combinations as filters\n"
                               "--testnet       Use testnet\n"
                               "--wipeban       Wipe list of banned nodes\n"
@@ -69,16 +67,15 @@ public:
         {"onion", required_argument, 0, 'o'},
         {"proxyipv4", required_argument, 0, 'i'},
         {"proxyipv6", required_argument, 0, 'k'},
-        {"daemon", no_argument, &fDaemon, 1},
         {"filter", required_argument, 0, 'w'},
         {"testnet", no_argument, &fUseTestNet, 1},
         {"wipeban", no_argument, &fWipeBan, 1},
         {"wipeignore", no_argument, &fWipeBan, 1},
-        {"help", no_argument, 0, '?'},
+        {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
       };
       int option_index = 0;
-      int c = getopt_long(argc, argv, "h:n:m:t:p:d:o:i:k:w:?", long_options, &option_index);
+      int c = getopt_long(argc, argv, "h:n:m:t:p:d:o:i:k:w:", long_options, &option_index);
       if (c == -1) break;
       switch (c) {
         case 'h': {
@@ -150,26 +147,19 @@ public:
       }
     }
     if (filter_whitelist.empty()) {
-        filter_whitelist.insert(NODE_NETWORK);
-        filter_whitelist.insert(NODE_NETWORK | NODE_BLOOM);
-        filter_whitelist.insert(NODE_NETWORK | NODE_WITNESS);
-        filter_whitelist.insert(NODE_NETWORK | NODE_WITNESS | NODE_COMPACT_FILTERS);
-        filter_whitelist.insert(NODE_NETWORK | NODE_WITNESS | NODE_BLOOM);
-        filter_whitelist.insert(NODE_NETWORK_LIMITED);
-        filter_whitelist.insert(NODE_NETWORK_LIMITED | NODE_BLOOM);
-        filter_whitelist.insert(NODE_NETWORK_LIMITED | NODE_WITNESS);
-        filter_whitelist.insert(NODE_NETWORK_LIMITED | NODE_WITNESS | NODE_COMPACT_FILTERS);
-        filter_whitelist.insert(NODE_NETWORK_LIMITED | NODE_WITNESS | NODE_BLOOM);
+        filter_whitelist.insert(1);
+        filter_whitelist.insert(5);
+        filter_whitelist.insert(9);
+        filter_whitelist.insert(13);
     }
     if (host != NULL && ns == NULL) showHelp = true;
-    if (showHelp) {
-      fprintf(stderr, help, argv[0]);
-      exit(0);
-    }
+    if (showHelp) fprintf(stderr, help, argv[0]);
   }
 };
 
+extern "C" {
 #include "dns.h"
+}
 
 CAddrDb db;
 
@@ -340,50 +330,6 @@ int StatCompare(const CAddrReport& a, const CAddrReport& b) {
   }
 }
 
-bool isDumpDbRunning = false;
-
-extern "C" void DumpDb() {
-  if (isDumpDbRunning == true) {
-    while (isDumpDbRunning) {
-        sleep (1); // Wait for the dump to complete
-    }
-    return;
-  }
-  isDumpDbRunning = true;
-  vector<CAddrReport> v = db.GetAll();
-  sort(v.begin(), v.end(), StatCompare);
-  FILE *f = fopen("dnsseed.dat.new","w+");
-  if (f) {
-    {
-      CAutoFile cf(f);
-      cf << db;
-    }
-    rename("dnsseed.dat.new", "dnsseed.dat");
-  }
-  FILE *d = fopen("dnsseed.dump", "w");
-  fprintf(d, "# address                                        good  lastSuccess    %%(2h)   %%(8h)   %%(1d)   %%(7d)  %%(30d)  blocks      svcs  version\n");
-  double stat[5]={0,0,0,0,0};
-  for (vector<CAddrReport>::const_iterator it = v.begin(); it < v.end(); it++) {
-    CAddrReport rep = *it;
-    fprintf(d, "%-47s  %4d  %11" PRId64 "  %6.2f%% %6.2f%% %6.2f%% %6.2f%% %6.2f%%  %6i  %08" PRIx64 "  %5i \"%s\"\n", rep.ip.ToString().c_str(), (int)rep.fGood, rep.lastSuccess, 100.0*rep.uptime[0], 100.0*rep.uptime[1], 100.0*rep.uptime[2], 100.0*rep.uptime[3], 100.0*rep.uptime[4], rep.blocks, rep.services, rep.clientVersion, rep.clientSubVersion.c_str());
-    stat[0] += rep.uptime[0];
-    stat[1] += rep.uptime[1];
-    stat[2] += rep.uptime[2];
-    stat[3] += rep.uptime[3];
-    stat[4] += rep.uptime[4];
-  }
-  fclose(d);
-  FILE *ff = fopen("dnsstats.log", "a");
-  fprintf(ff, "%llu %g %g %g %g %g\n", (unsigned long long)(time(NULL)), stat[0], stat[1], stat[2], stat[3], stat[4]);
-  fclose(ff);
-  isDumpDbRunning = false;
-}
-
-extern "C" void SIGINTHandler(int signum) {
-  DumpDb();
-  exit(0);
-}
-
 extern "C" void* ThreadDumper(void*) {
   int count = 0;
   do {
@@ -391,7 +337,32 @@ extern "C" void* ThreadDumper(void*) {
     if (count < 5)
         count++;
     {
-      DumpDb();
+      vector<CAddrReport> v = db.GetAll();
+      sort(v.begin(), v.end(), StatCompare);
+      FILE *f = fopen("dnsseed.dat.new","w+");
+      if (f) {
+        {
+          CAutoFile cf(f);
+          cf << db;
+        }
+        rename("dnsseed.dat.new", "dnsseed.dat");
+      }
+      FILE *d = fopen("dnsseed.dump", "w");
+      fprintf(d, "# address                                        good  lastSuccess    %%(2h)   %%(8h)   %%(1d)   %%(7d)  %%(30d)  blocks      svcs  version\n");
+      double stat[5]={0,0,0,0,0};
+      for (vector<CAddrReport>::const_iterator it = v.begin(); it < v.end(); it++) {
+        CAddrReport rep = *it;
+        fprintf(d, "%-47s  %4d  %11" PRId64 "  %6.2f%% %6.2f%% %6.2f%% %6.2f%% %6.2f%%  %6i  %08" PRIx64 "  %5i \"%s\"\n", rep.ip.ToString().c_str(), (int)rep.fGood, rep.lastSuccess, 100.0*rep.uptime[0], 100.0*rep.uptime[1], 100.0*rep.uptime[2], 100.0*rep.uptime[3], 100.0*rep.uptime[4], rep.blocks, rep.services, rep.clientVersion, rep.clientSubVersion.c_str());
+        stat[0] += rep.uptime[0];
+        stat[1] += rep.uptime[1];
+        stat[2] += rep.uptime[2];
+        stat[3] += rep.uptime[3];
+        stat[4] += rep.uptime[4];
+      }
+      fclose(d);
+      FILE *ff = fopen("dnsstats.log", "a");
+      fprintf(ff, "%llu %g %g %g %g %g\n", (unsigned long long)(time(NULL)), stat[0], stat[1], stat[2], stat[3], stat[4]);
+      fclose(ff);
     }
   } while(1);
   return nullptr;
@@ -430,11 +401,7 @@ static const string mainnet_seeds[] = {"seed1.okcash.co", "seed2.okcash.co", "se
 static const string testnet_seeds[] = {""};
 static const string *seeds = mainnet_seeds;
 
-extern "C" void *ThreadSeeder(void *)
-{
-  if (!fTestNet){
-    db.Add(CService("vps53.okcash.co", GetDefaultPort()), true);
-  }
+extern "C" void* ThreadSeeder(void*) {
   do {
     for (int i=0; seeds[i] != ""; i++) {
       vector<CNetAddr> ips;
@@ -504,12 +471,6 @@ int main(int argc, char **argv) {
     fprintf(stderr, "No e-mail address set. Please use -m.\n");
     exit(1);
   }
-  if (opts.fDaemon) {
-    if (daemon(1, 0) == -1) {
-      perror("daemon");
-      exit(1);
-    }
-  }
   FILE *f = fopen("dnsseed.dat","r");
   if (f) {
     printf("Loading dnsseed.dat...");
@@ -546,7 +507,6 @@ int main(int argc, char **argv) {
   }
   pthread_attr_destroy(&attr_crawler);
   printf("done\n");
-  signal(SIGINT, SIGINTHandler);
   pthread_create(&threadStats, NULL, ThreadStats, NULL);
   pthread_create(&threadDump, NULL, ThreadDumper, NULL);
   void* res;
